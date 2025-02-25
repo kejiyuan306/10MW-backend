@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 @Service
@@ -17,6 +18,7 @@ public class MQTTService {
     private final MQTTConfig mqttConfig;
     private final MQTTConnectConfig mqttConnectConfig;
     private MqttClient mqttClient;
+    private MqttTopic mqttTopic;
 
     public MQTTService(MQTTConfig mqttConfig, MQTTConnectConfig mqttConnectConfig) {
         this.mqttConfig = mqttConfig;
@@ -31,7 +33,11 @@ public class MQTTService {
                     mqttConfig.getClientId(),
                     new MemoryPersistence()
             );
-            mqttClient.setCallback(new MqttCallback() {
+            mqttClient.setCallback(new MqttCallbackExtended() {
+                @Override
+                public void connectComplete(boolean reconnect, String serverURI) {
+                    log.info("Connected to MQTT broker: {}, reconnected: {}", serverURI, reconnect);
+                }
 
                 @Override
                 public void connectionLost(Throwable cause) {
@@ -47,14 +53,20 @@ public class MQTTService {
                 @Override
                 public void deliveryComplete(IMqttDeliveryToken token) {
                     try {
-                        log.info("Message successfully delivered - Topic: {}, Content: {}",
-                                token.getTopics()[0], new String(token.getMessage().getPayload(), StandardCharsets.UTF_8));
+                        if (token != null && token.getMessage() != null) {
+                            log.info("Message successfully delivered - Topic: {}, Content: {}",
+                                    token.getTopics()[0], new String(token.getMessage().getPayload(), StandardCharsets.UTF_8));
+                        } else {
+                            log.info("Message delivery complete, but token or message is null");
+                        }
                     } catch (MqttException e) {
                         log.error("Error accessing delivered message details", e);
                     }
                 }
             });
             connect();
+            // Initialize the topic object once connected
+            mqttTopic = mqttClient.getTopic(mqttConfig.getTopic());
         } catch (MqttException e) {
             log.error("Failed to initialize MQTT client", e);
             throw new RuntimeException("MQTT initialization failed", e);
@@ -68,22 +80,52 @@ public class MQTTService {
         }
     }
 
-    public void publishMessage(String message) {
+    public CompletableFuture<Void> publishMessage(String message) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+
         try {
             if (!mqttClient.isConnected()) {
                 connect();
+                // Re-initialize topic if reconnected
+                mqttTopic = mqttClient.getTopic(mqttConfig.getTopic());
             }
 
             MqttMessage mqttMessage = new MqttMessage(message.getBytes(StandardCharsets.UTF_8));
             mqttMessage.setQos(1);
             mqttMessage.setRetained(false);
 
-            mqttClient.publish(mqttConfig.getTopic(), mqttMessage);
+            // Use MqttTopic to publish message and get the token
+            MqttDeliveryToken token = mqttTopic.publish(mqttMessage);
+
+            // Add a listener to the token to handle completion
+            token.setActionCallback(new IMqttActionListener() {
+                @Override
+                public void onSuccess(IMqttToken asyncActionToken) {
+                    try {
+                        log.info("Message published successfully - Topic: {}, Content: {}",
+                                mqttConfig.getTopic(), message);
+                        future.complete(null);
+                    } catch (Exception e) {
+                        log.error("Error in success callback", e);
+                        future.completeExceptionally(e);
+                    }
+                }
+
+                @Override
+                public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+                    log.error("Failed to publish message", exception);
+                    future.completeExceptionally(exception);
+                }
+            });
+
             log.debug("Message queued for publishing - Topic: {}", mqttConfig.getTopic());
         } catch (MqttException e) {
             log.error("Failed to publish message", e);
+            future.completeExceptionally(e);
             throw new RuntimeException("Message publishing failed", e);
         }
+
+        return future;
     }
 
     @PreDestroy
