@@ -128,6 +128,61 @@ public class MQTTService {
         return future;
     }
 
+    /**
+     * Publish a message to a specific topic
+     * @param topic The topic to publish to
+     * @param message The message content
+     * @return CompletableFuture that completes when the message is published
+     */
+    public CompletableFuture<Void> publishToTopic(String topic, String message) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+
+        try {
+            if (!mqttClient.isConnected()) {
+                connect();
+            }
+
+            MqttMessage mqttMessage = new MqttMessage(message.getBytes(StandardCharsets.UTF_8));
+            mqttMessage.setQos(1);
+            mqttMessage.setRetained(false);
+
+            // Get the topic object for the specified topic
+            MqttTopic mqttTopic = mqttClient.getTopic(topic);
+
+            // Publish the message and get the token
+            MqttDeliveryToken token = mqttTopic.publish(mqttMessage);
+
+            // Add a listener to the token to handle completion
+            token.setActionCallback(new IMqttActionListener() {
+                @Override
+                public void onSuccess(IMqttToken asyncActionToken) {
+                    try {
+                        log.info("Message published successfully - Topic: {}, Content: {}",
+                                topic, message);
+                        future.complete(null);
+                    } catch (Exception e) {
+                        log.error("Error in success callback", e);
+                        future.completeExceptionally(e);
+                    }
+                }
+
+                @Override
+                public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+                    log.error("Failed to publish message to topic: {}", topic, exception);
+                    future.completeExceptionally(exception);
+                }
+            });
+
+            log.debug("Message queued for publishing - Topic: {}", topic);
+        } catch (MqttException e) {
+            log.error("Failed to publish message to topic: {}", topic, e);
+            future.completeExceptionally(e);
+            throw new RuntimeException("Message publishing failed", e);
+        }
+
+        return future;
+    }
+
     @PreDestroy
     public void destroy() {
         try {
