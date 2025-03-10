@@ -46,24 +46,6 @@ public class MQTTService {
         }
     }
 
-    /**
-     * 向指定代理的指定Topic发布消息（使用默认用户名和密码）
-     *
-     * @param brokerUrl MQTT代理URL，例如 "tcp://broker.example.com:1883"
-     * @param topic 发布的主题
-     * @param message 消息内容
-     * @return 消息发布完成的CompletableFuture
-     */
-    public CompletableFuture<Void> publishToBrokerTopic(String brokerUrl, String topic, String message) {
-        MQTTConnectionParams params = MQTTConnectionParams.builder()
-                .host(brokerUrl)
-                .username(mqttConfig.getDefaultUsername())
-                .password(mqttConfig.getDefaultPassword())
-                .build();
-
-        return publishMessage(params, topic, message);
-    }
-
     @PreDestroy
     public void destroy() {
         mqttClientWrapper.disconnect();
