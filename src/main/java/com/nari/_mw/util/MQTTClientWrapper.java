@@ -7,16 +7,22 @@ import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 public class MQTTClientWrapper {
     private final MqttClient client;
+    private final ConcurrentHashMap<String, BlockingQueue<String>> messageQueues;
 
     public MQTTClientWrapper(MQTTConnectionParams params) {
         try {
             String clientId = "mqtt-client-" + UUID.randomUUID();
             this.client = new MqttClient(params.getHost(), clientId, new MemoryPersistence());
+            this.messageQueues = new ConcurrentHashMap<>();
             setupClientCallbacks();
             connectClient(params.getUsername(), params.getPassword());
         } catch (MqttException e) {
@@ -30,6 +36,16 @@ public class MQTTClientWrapper {
             @Override
             public void connectComplete(boolean reconnect, String serverURI) {
                 log.info("已连接到MQTT代理: {}, 是否重连: {}", serverURI, reconnect);
+                // 重新订阅所有主题
+                if (reconnect) {
+                    messageQueues.keySet().forEach(topic -> {
+                        try {
+                            doSubscribe(topic);
+                        } catch (MqttException e) {
+                            log.error("重连后重新订阅主题失败: {}", topic, e);
+                        }
+                    });
+                }
             }
 
             @Override
@@ -39,8 +55,19 @@ public class MQTTClientWrapper {
 
             @Override
             public void messageArrived(String topic, MqttMessage message) {
-                log.info("收到消息 - Topic: {}, Content: {}",
-                        topic, new String(message.getPayload(), StandardCharsets.UTF_8));
+                String messageContent = new String(message.getPayload(), StandardCharsets.UTF_8);
+                log.info("收到消息 - Topic: {}, Content: {}", topic, messageContent);
+
+                // 将消息放入对应的队列
+                BlockingQueue<String> queue = messageQueues.get(topic);
+                if (queue != null) {
+                    try {
+                        queue.put(messageContent);
+                    } catch (InterruptedException e) {
+                        log.error("向队列添加消息时被中断: {}", topic, e);
+                        Thread.currentThread().interrupt();
+                    }
+                }
             }
 
             @Override
@@ -69,6 +96,77 @@ public class MQTTClientWrapper {
             client.connect(options);
             log.info("已连接到MQTT代理: {}", client.getServerURI());
         }
+    }
+
+    /**
+     * 订阅指定的主题
+     *
+     * @param topic 要订阅的主题
+     * @return 订阅成功的CompletableFuture
+     */
+    public CompletableFuture<Void> subscribe(String topic) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        try {
+            // 确保客户端已连接
+            if (!client.isConnected()) {
+                throw new MqttException(MqttException.REASON_CODE_CLIENT_NOT_CONNECTED);
+            }
+
+            // 为主题创建队列
+            messageQueues.putIfAbsent(topic, new LinkedBlockingQueue<>());
+
+            doSubscribe(topic);
+            future.complete(null);
+            log.info("成功订阅主题: {}", topic);
+        } catch (MqttException e) {
+            log.error("订阅主题失败: {}", topic, e);
+            future.completeExceptionally(e);
+        }
+        return future;
+    }
+
+    private void doSubscribe(String topic) throws MqttException {
+        client.subscribe(topic);
+    }
+
+    /**
+     * 监听指定主题的消息，直到收到消息或超时
+     *
+     * @param topic 要监听的主题
+     * @param timeout 超时时间（毫秒）
+     * @return 收到的消息内容
+     * @throws InterruptedException 如果线程被中断
+     * @throws RuntimeException 如果超时或该主题没有订阅
+     */
+    public String listen(String topic, long timeout) throws InterruptedException {
+        BlockingQueue<String> queue = messageQueues.get(topic);
+        if (queue == null) {
+            throw new RuntimeException("未订阅该主题: " + topic);
+        }
+
+        String message = queue.poll(timeout, TimeUnit.MILLISECONDS);
+        if (message == null) {
+            throw new RuntimeException("监听主题超时: " + topic);
+        }
+
+        return message;
+    }
+
+    /**
+     * 监听指定主题的消息，无限期等待
+     *
+     * @param topic 要监听的主题
+     * @return 收到的消息内容
+     * @throws InterruptedException 如果线程被中断
+     * @throws RuntimeException 如果该主题没有订阅
+     */
+    public String listen(String topic) throws InterruptedException {
+        BlockingQueue<String> queue = messageQueues.get(topic);
+        if (queue == null) {
+            throw new RuntimeException("未订阅该主题: " + topic);
+        }
+
+        return queue.take();
     }
 
     public CompletableFuture<Void> publishMessage(String topic, String message) {
