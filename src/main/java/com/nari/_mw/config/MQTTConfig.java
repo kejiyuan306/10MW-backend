@@ -10,13 +10,11 @@ import org.springframework.context.annotation.Configuration;
 public class MQTTConfig {
     public static final String PREFIX = "mqtt";
 
-    private String host;
     private String clientId;
-    private String username;
-    private String password;
-    private boolean cleanSession;
-    private String topic;
-    private int timeout;
-    private int keepAlive;
-    private int connectionTimeout;
+    private String defaultUsername;
+    private String defaultPassword;
+    private boolean cleanSession = true;
+    private int timeout = 30;
+    private int keepAlive = 60;
+    private int connectionTimeout = 30;
 }

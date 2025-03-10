@@ -14,4 +14,6 @@ public class DeviceFunctionBlockRequest {
 
     @NotEmpty(message = "Function blocks list cannot be empty")
     private List<FunctionBlock> functionBlocks;
+
+    private MQTTConnectionParams mqttConnectionParams;
 }

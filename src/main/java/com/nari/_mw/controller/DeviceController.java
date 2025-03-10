@@ -20,11 +20,8 @@ public class DeviceController {
     @PostMapping("/function-blocks")
     public CompletableFuture<ResponseEntity<MessageResponse>> processFunctionBlocks(
             @Valid @RequestBody DeviceFunctionBlockRequest request) {
-
         return deviceService.processFunctionBlocks(request)
                 .thenApply(v -> ResponseEntity.ok(
-                        new MessageResponse("Function blocks published successfully for device: " + request.getDeviceId())))
-                .exceptionally(ex -> ResponseEntity.badRequest()
-                        .body(new MessageResponse("Failed to publish function blocks: " + ex.getMessage())));
+                        new MessageResponse("功能块成功发布至设备: " + request.getDeviceId())));
     }
 }
