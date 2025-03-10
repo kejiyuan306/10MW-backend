@@ -1,6 +1,5 @@
 package com.nari._mw.util;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -8,14 +7,13 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class TopicBuilder {
-    private static final String DEVICE_TOPIC_TEMPLATE = "power/10mw/device/%s";
+    private static final String PUBLISH_TOPIC_TEMPLATE = "power/10mw/publish/%s";
+    private static final String SUBSCRIBE_TOPIC_TEMPLATE = "power/10mw/subscribe/%s";
 
-    /**
-     * Builds a topic for a specific device
-     * @param deviceId The device ID
-     * @return The complete topic string
-     */
-    public String buildDeviceTopic(String deviceId) {
-        return String.format(DEVICE_TOPIC_TEMPLATE, deviceId);
+    public String buildPublishTopic(String deviceId) {
+        return String.format(PUBLISH_TOPIC_TEMPLATE, deviceId);
+    }
+    public String buildSubscribeTopic(String deviceId) {
+        return String.format(SUBSCRIBE_TOPIC_TEMPLATE, deviceId);
     }
 }

@@ -1,7 +1,7 @@
 package com.nari._mw.service;
 
 import com.alibaba.fastjson.JSON;
-import com.nari._mw.config.MQTTConfig;
+import com.nari._mw.config.MQTTDefaultConfig;
 import com.nari._mw.dto.DeviceFunctionBlockRequest;
 import com.nari._mw.dto.MQTTConnectionParams;
 import com.nari._mw.exception.MQTTValidationException;
@@ -20,7 +20,7 @@ import java.util.concurrent.CompletableFuture;
 @RequiredArgsConstructor
 public class DeviceService {
     private final TopicBuilder topicBuilder;
-    private final MQTTConfig mqttConfig;
+    private final MQTTDefaultConfig mqttDefaultConfig;
 
     /**
      * Process function blocks for a device and publish to MQTT
@@ -47,8 +47,8 @@ public class DeviceService {
             if (usernameEmpty && passwordEmpty) {
                 // 两者都为空，使用默认凭据
                 log.debug("使用默认用户名和密码连接MQTT代理: {}", params.getHost());
-                params.setUsername(mqttConfig.getDefaultUsername());
-                params.setPassword(mqttConfig.getDefaultPassword());
+                params.setUsername(mqttDefaultConfig.getDefaultUsername());
+                params.setPassword(mqttDefaultConfig.getDefaultPassword());
             } else if (usernameEmpty || passwordEmpty) {
                 // 只有一个为空，报错
                 throw new MQTTValidationException("用户名和密码必须同时提供或同时为空", 400);
@@ -63,7 +63,7 @@ public class DeviceService {
             log.debug("设备 {} 的功能块序列化结果: {}", request.getDeviceId(), payload);
 
             // Build the topic for this device
-            String topic = topicBuilder.buildDeviceTopic(request.getDeviceId());
+            String topic = topicBuilder.buildPublishTopic(request.getDeviceId());
 
             // 创建MQTTClientWrapper实例并发布消息
             log.debug("使用凭据连接MQTT代理: {}, 用户名: {}", params.getHost(), params.getUsername());

@@ -6,15 +6,11 @@ import org.springframework.context.annotation.Configuration;
 
 @Data
 @Configuration
-@ConfigurationProperties(MQTTConfig.PREFIX)
-public class MQTTConfig {
+@ConfigurationProperties(MQTTDefaultConfig.PREFIX)
+public class MQTTDefaultConfig {
     public static final String PREFIX = "mqtt";
 
     private String clientId;
     private String defaultUsername;
     private String defaultPassword;
-    private boolean cleanSession = true;
-    private int timeout = 30;
-    private int keepAlive = 60;
-    private int connectionTimeout = 30;
 }
