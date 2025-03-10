@@ -7,6 +7,7 @@ import com.nari._mw.dto.MQTTConnectionParams;
 import com.nari._mw.exception.MQTTValidationException;
 import com.nari._mw.exception.MessageProcessingException;
 import com.nari._mw.model.FunctionBlockConfiguration;
+import com.nari._mw.util.MQTTClientWrapper;
 import com.nari._mw.util.TopicBuilder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,7 +19,6 @@ import java.util.concurrent.CompletableFuture;
 @Service
 @RequiredArgsConstructor
 public class DeviceService {
-    private final MQTTService mqttService;
     private final TopicBuilder topicBuilder;
     private final MQTTConfig mqttConfig;
 
@@ -28,6 +28,7 @@ public class DeviceService {
      * @return CompletableFuture that completes when the message is published
      */
     public CompletableFuture<Void> processFunctionBlocks(DeviceFunctionBlockRequest request) {
+        MQTTClientWrapper mqttClient = null;
         try {
             // 验证MQTT连接参数
             MQTTConnectionParams params = request.getMqttConnectionParams();
@@ -64,15 +65,32 @@ public class DeviceService {
             // Build the topic for this device
             String topic = topicBuilder.buildDeviceTopic(request.getDeviceId());
 
-            // 使用统一的方式发布消息
+            // 创建MQTTClientWrapper实例并发布消息
             log.debug("使用凭据连接MQTT代理: {}, 用户名: {}", params.getHost(), params.getUsername());
-            return mqttService.publishMessage(params, topic, payload);
+            mqttClient = new MQTTClientWrapper(params);
+            // 只是满足lamda表达式中的变量为final的要求
+            MQTTClientWrapper finalMqttClient = mqttClient;
+            return mqttClient.publishMessage(topic, payload)
+                    .whenComplete((result, ex) -> {
+                        // 无论成功还是失败，都断开连接
+                        if (finalMqttClient != null) {
+                            finalMqttClient.disconnect();
+                        }
+                    });
 
         } catch (MQTTValidationException e) {
             log.error("MQTT连接参数验证失败", e);
+            // 确保在异常情况下断开连接
+            if (mqttClient != null) {
+                mqttClient.disconnect();
+            }
             throw e;
         } catch (Exception e) {
             log.error("处理功能块失败", e);
+            // 确保在异常情况下断开连接
+            if (mqttClient != null) {
+                mqttClient.disconnect();
+            }
             throw new MessageProcessingException("处理功能块失败: " + e.getMessage(), e);
         }
     }
