@@ -17,6 +17,12 @@ import java.util.concurrent.CompletableFuture;
 public class DeviceController {
     private final DeviceService deviceService;
 
+    @GetMapping("/test")
+    public CompletableFuture<String> test() {
+        return deviceService.test();
+    }
+
+    //Spring中使用CompletableFuture：该函数接受到一个CompletableFuture对象后，Spring 会在内部注册一个回调，等待 CompletableFuture 完成，然后再返回给客户端
     @PostMapping("/function-blocks")
     public CompletableFuture<ResponseEntity<MessageResponse>> processFunctionBlocks(
             @Valid @RequestBody DeviceFunctionBlockRequest request) {
