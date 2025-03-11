@@ -132,11 +132,11 @@ public class MQTTClientWrapper {
     /**
      * 监听指定主题的消息，直到收到消息或超时
      *
-     * @param topic 要监听的主题
+     * @param topic   要监听的主题
      * @param timeout 超时时间（毫秒）
      * @return 收到的消息内容
      * @throws InterruptedException 如果线程被中断
-     * @throws RuntimeException 如果超时或该主题没有订阅
+     * @throws RuntimeException     如果超时或该主题没有订阅
      */
     public String listen(String topic, long timeout) throws InterruptedException {
         BlockingQueue<String> queue = messageQueues.get(topic);
@@ -158,26 +158,16 @@ public class MQTTClientWrapper {
      * @param topic 要监听的主题
      * @return CompletableFuture that completes with the received message content
      */
-    public CompletableFuture<String> listen(String topic) {
-        CompletableFuture<String> future = new CompletableFuture<>();
+    public String listen(String topic) {
         BlockingQueue<String> queue = messageQueues.get(topic);
-
-        if (queue == null) {
-            future.completeExceptionally(new RuntimeException("未订阅该主题: " + topic));
-            return future;
+        String message = null;
+        try {
+            message = queue.take();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
 
-        CompletableFuture.runAsync(() -> {
-            try {
-                String message = queue.take();
-                future.complete(message);
-            } catch (InterruptedException e) {
-                future.completeExceptionally(e);
-                Thread.currentThread().interrupt();
-            }
-        });
-
-        return future;
+        return message;
     }
 
     public CompletableFuture<Void> publishMessage(String topic, String message) {

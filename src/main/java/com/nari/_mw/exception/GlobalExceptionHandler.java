@@ -23,4 +23,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest()
                 .body(new MessageResponse("处理失败: " + ex.getMessage()));
     }
+
+    @ExceptionHandler(DeviceInteractionException.class)
+    public ResponseEntity<MessageResponse> handleDeviceInteractionException(DeviceInteractionException ex) {
+        log.error("设备交互失败: 设备ID={}", ex.getDeviceId(), ex);
+        return ResponseEntity.status(500)
+                .body(new MessageResponse("设备交互失败: " + ex.getMessage() + ", 设备ID: " + ex.getDeviceId()));
+    }
 }

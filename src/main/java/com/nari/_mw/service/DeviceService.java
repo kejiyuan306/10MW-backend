@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSON;
 import com.nari._mw.config.MQTTDefaultConfig;
 import com.nari._mw.dto.DeviceFunctionBlockRequest;
 import com.nari._mw.dto.MQTTConnectionParams;
+import com.nari._mw.exception.DeviceInteractionException;
 import com.nari._mw.exception.MQTTValidationException;
 import com.nari._mw.exception.MessageProcessingException;
 import com.nari._mw.model.FunctionBlockConfiguration;
@@ -33,13 +34,52 @@ public class DeviceService {
 
         mqttClient.subscribe(subscribeTopic);
         mqttClient.publishMessage(publishTopic, "hello world");
-        return mqttClient.listen(subscribeTopic)
-                .whenComplete((result, ex) -> {
-                    // 无论成功还是失败，都断开连接
-                    if (mqttClient != null) {
-                        mqttClient.disconnect();
-                    }
-                });
+
+        return CompletableFuture.supplyAsync(() -> mqttClient.listen(subscribeTopic));
+    }
+
+    public CompletableFuture<Void> testInteract() {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+
+        String deviceId = "device123";
+        MQTTConnectionParams params = new MQTTConnectionParams("tcp://localhost:1883", "admin", "abcd1234");
+
+        String publishTopic = topicBuilder.buildPublishTopic(deviceId);
+        String subscribeTopic = topicBuilder.buildSubscribeTopic(deviceId);
+
+        MQTTClientWrapper mqttClient = new MQTTClientWrapper(params);
+
+        mqttClient.subscribe(subscribeTopic);
+
+
+        return CompletableFuture.supplyAsync(() -> {
+            String startMsg = "start";
+            String endMsg = "end";
+            int[] testArr = new int[]{1, 2, 3, 4, 5};
+            // 1. test start
+            tryPublish(mqttClient, publishTopic, subscribeTopic, startMsg, deviceId);
+            for (int num : testArr) {
+                // 2. test num
+                tryPublish(mqttClient, publishTopic, subscribeTopic, String.valueOf(num), deviceId);
+            }
+            // 3. test end
+            tryPublish(mqttClient, publishTopic, subscribeTopic, endMsg, deviceId);
+            return null;
+        });
+    }
+
+    private void tryPublish(MQTTClientWrapper mqttClient, String publishTopic, String subscribeTopic,
+                            String msg, String deviceId) {
+        String rightMsg = "success";
+        String wrongMsg = "error";
+        mqttClient.publishMessage(publishTopic, msg);
+        String response = mqttClient.listen(subscribeTopic);
+        for (int i = 0; i < 50; i++) {
+            if (response.equals(rightMsg)) break;
+            mqttClient.publishMessage(publishTopic, msg);
+            response = mqttClient.listen(subscribeTopic);
+        }
+        if (response.equals(wrongMsg)) throw new DeviceInteractionException("设备返回错误响应，超出重试次数", deviceId);
     }
 
     /**
