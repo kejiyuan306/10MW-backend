@@ -10,5 +10,7 @@ public class PublishConfigRequest {
     @NotBlank(message = "Device ID cannot be empty")
     private String deviceId;
 
+    private int sliceSize;
+
     private MQTTConnectionParams mqttConnectionParams;
 }

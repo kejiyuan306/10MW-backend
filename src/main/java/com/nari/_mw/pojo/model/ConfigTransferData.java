@@ -11,7 +11,16 @@ import java.util.List;
 @AllArgsConstructor
 @NoArgsConstructor
 public class ConfigTransferData {
-    private double size;
-    private double sliceSize;
+    /**
+     * 文件总大小
+     */
+    private long size;
+    /**
+     * 切片大小
+     */
+    private int sliceSize;
+    /**
+     * 切片列表
+     */
     private List<ConfigTransferSlice> slices;
 }
