@@ -1,6 +1,6 @@
 package com.nari._mw.util;
 
-import com.nari._mw.dto.MQTTConnectionParams;
+import com.nari._mw.pojo.dto.mqtt.connect.MQTTConnectionParams;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;

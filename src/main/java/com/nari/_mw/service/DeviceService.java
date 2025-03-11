@@ -2,12 +2,13 @@ package com.nari._mw.service;
 
 import com.alibaba.fastjson.JSON;
 import com.nari._mw.config.MQTTDefaultConfig;
-import com.nari._mw.dto.DeviceFunctionBlockRequest;
-import com.nari._mw.dto.MQTTConnectionParams;
+import com.nari._mw.pojo.dto.request.DeviceFunctionBlockRequest;
+import com.nari._mw.pojo.dto.mqtt.connect.MQTTConnectionParams;
+import com.nari._mw.pojo.dto.request.PublishConfigRequest;
 import com.nari._mw.exception.DeviceInteractionException;
 import com.nari._mw.exception.MQTTValidationException;
 import com.nari._mw.exception.MessageProcessingException;
-import com.nari._mw.model.FunctionBlockConfiguration;
+import com.nari._mw.pojo.model.FunctionBlockConfiguration;
 import com.nari._mw.util.MQTTClientWrapper;
 import com.nari._mw.util.TopicBuilder;
 import lombok.RequiredArgsConstructor;
@@ -68,13 +69,36 @@ public class DeviceService {
         });
     }
 
+    public CompletableFuture<Void> publishConfig(PublishConfigRequest request) {
+        MQTTClientWrapper mqttClient = null;
+        try {
+            // 验证MQTT连接参数
+            MQTTConnectionParams params = request.getMqttConnectionParams();
+            params = validateAndProcessMQTTParams(params);
+
+            // 创建MQTTClientWrapper实例并发布消息
+            log.debug("使用凭据连接MQTT代理: {}, 用户名: {}", params.getHost(), params.getUsername());
+            mqttClient = new MQTTClientWrapper(params);
+
+            return null;
+        } catch (MQTTValidationException e) {
+            log.error("MQTT连接参数验证失败", e);
+            // 确保在异常情况下断开连接
+            if (mqttClient != null) {
+                mqttClient.disconnect();
+            }
+            throw e;
+        }
+    }
+
     private void tryPublish(MQTTClientWrapper mqttClient, String publishTopic, String subscribeTopic,
                             String msg, String deviceId) {
         String rightMsg = "success";
         String wrongMsg = "error";
         mqttClient.publishMessage(publishTopic, msg);
         String response = mqttClient.listen(subscribeTopic);
-        for (int i = 0; i < 50; i++) {
+        final int MAX_TRY_TIME = 50;
+        for (int i = 0; i < MAX_TRY_TIME; i++) {
             if (response.equals(rightMsg)) break;
             mqttClient.publishMessage(publishTopic, msg);
             response = mqttClient.listen(subscribeTopic);
@@ -83,10 +107,10 @@ public class DeviceService {
     }
 
     /**
-     * Process function blocks for a device and publish to MQTT
+     * 处理设备的功能块并发布到MQTT
      *
-     * @param request The request containing device ID, function blocks and MQTT connection parameters
-     * @return CompletableFuture that completes when the message is published
+     * @param request 包含设备ID、功能块和MQTT连接参数的请求
+     * @return 当消息发布完成时完成的CompletableFuture
      */
     public CompletableFuture<Void> processFunctionBlocks(DeviceFunctionBlockRequest request) {
         MQTTClientWrapper mqttClient = null;

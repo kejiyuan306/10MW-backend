@@ -1,6 +1,7 @@
-package com.nari._mw.dto;
+package com.nari._mw.pojo.dto.request;
 
-import com.nari._mw.model.FunctionBlock;
+import com.nari._mw.pojo.dto.mqtt.connect.MQTTConnectionParams;
+import com.nari._mw.pojo.model.FunctionBlock;
 import lombok.Data;
 
 import javax.validation.constraints.NotBlank;

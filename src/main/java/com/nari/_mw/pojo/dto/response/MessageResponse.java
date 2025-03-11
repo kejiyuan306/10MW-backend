@@ -1,4 +1,4 @@
-package com.nari._mw.dto;
+package com.nari._mw.pojo.dto.response;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

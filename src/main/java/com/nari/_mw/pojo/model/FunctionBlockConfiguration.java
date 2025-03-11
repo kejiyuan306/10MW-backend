@@ -1,4 +1,4 @@
-package com.nari._mw.model;
+package com.nari._mw.pojo.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

@@ -1,6 +1,6 @@
 package com.nari._mw.exception;
 
-import com.nari._mw.dto.MessageResponse;
+import com.nari._mw.pojo.dto.response.MessageResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ControllerAdvice;

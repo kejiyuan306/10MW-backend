@@ -1,7 +1,7 @@
 package com.nari._mw.controller;
 
-import com.nari._mw.dto.DeviceFunctionBlockRequest;
-import com.nari._mw.dto.MessageResponse;
+import com.nari._mw.pojo.dto.request.DeviceFunctionBlockRequest;
+import com.nari._mw.pojo.dto.response.MessageResponse;
 import com.nari._mw.service.DeviceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;

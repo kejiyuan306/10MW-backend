@@ -1,4 +1,4 @@
-package com.nari._mw.dto;
+package com.nari._mw.pojo.dto.mqtt.connect;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
