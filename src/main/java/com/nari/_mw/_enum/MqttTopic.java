@@ -12,13 +12,13 @@ public enum MqttTopic {
     CONFIG_TRANSFER_REQUEST("config"),
 
     // 控制器向HMI发送准备就绪确认
-    CONFIG_TRANSFER_ACK("config/ack"),
+    CONFIG_TRANSFER_REQUEST_ACK("config/ack"),
 
     // HMI向控制器发送文件数据块
-    FILE_DATA_CHUNK("file/data"),
+    FILE_DATA_SLICE("file/data"),
 
     // 控制器向HMI发送数据块确认
-    FILE_CHUNK_ACK("file/dataack"),
+    FILE_SLICE_ACK("file/dataack"),
 
     // 控制器向HMI发送最终文件验证结果
     FILE_VERIFICATION_RESULT("file/ack");

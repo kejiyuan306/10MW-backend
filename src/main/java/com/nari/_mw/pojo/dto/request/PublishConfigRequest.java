@@ -10,6 +10,9 @@ public class PublishConfigRequest {
     @NotBlank(message = "Device ID cannot be empty")
     private String deviceId;
 
+    @NotBlank(message = "Config file path cannot be empty")
+    private String configFilePath;
+
     private int sliceSize;
 
     private MQTTConnectionParams mqttConnectionParams;

@@ -33,9 +33,9 @@ public class ConfigTransferMetadata {
     private String name;
 
     /**
-     * 文件总大小(kB)
+     * 文件总大小(bytes)
      */
-    private double size;
+    private long size;
 
     /**
      * 文件分片数
@@ -43,9 +43,9 @@ public class ConfigTransferMetadata {
     private int number;
 
     /**
-     * 单个分片文件大小(kB)
+     * 单个分片文件大小(bytes)
      */
-    private double onesize;
+    private int onesize;
 
     /**
      * 文件MD5值

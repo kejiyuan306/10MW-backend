@@ -3,6 +3,7 @@ package com.nari._mw.controller;
 import com.nari._mw.pojo.dto.request.DeviceFunctionBlockRequest;
 import com.nari._mw.pojo.dto.response.MessageResponse;
 import com.nari._mw.service.DeviceService;
+import com.nari._mw.service.TestDeviceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,15 +18,16 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class DeviceController {
     private final DeviceService deviceService;
+    private final TestDeviceService testDeviceService;
 
     @GetMapping("/test")
     public CompletableFuture<String> test() {
-        return deviceService.test();
+        return testDeviceService.test();
     }
 
     @GetMapping("/test-interact")
     public CompletableFuture<ResponseEntity<MessageResponse>> testInteract() {
-        return deviceService.testInteract().orTimeout(10, TimeUnit.MINUTES)
+        return testDeviceService.testInteract().orTimeout(10, TimeUnit.MINUTES)
                 .thenApply(v -> ResponseEntity.ok(
                         new MessageResponse("testInteract: 交互成功")));
     }

@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Objects;
+
 /**
  * 配置切片传输响应类
  * 用于接收设备对配置文件切片传输的响应状态
@@ -32,4 +34,16 @@ public class ConfigTransferSliceResponse {
      * failure: 传送失败，HMI接下来重新发送原来切片
      */
     private String status;
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        ConfigTransferSliceResponse that = (ConfigTransferSliceResponse) o;
+
+        if (number != that.number) return false;
+        if (!Objects.equals(taskNo, that.taskNo)) return false;
+        return Objects.equals(status, that.status);
+    }
 }

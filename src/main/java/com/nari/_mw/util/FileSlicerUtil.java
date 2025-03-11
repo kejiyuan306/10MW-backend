@@ -1,5 +1,6 @@
 package com.nari._mw.util;
 
+import com.nari._mw.exception.FileSliceException;
 import com.nari._mw.pojo.dto.mqtt.transfer.ConfigTransferSlice;
 import com.nari._mw.pojo.model.ConfigTransferData;
 import lombok.experimental.UtilityClass;
@@ -7,12 +8,15 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -33,22 +37,35 @@ public class FileSlicerUtil {
      * @return 包含文件切片信息的ConfigTransferData对象
      * @throws IOException 如果文件读取发生错误
      */
-    public static ConfigTransferData sliceFile(String filePath, int sliceSize) throws IOException {
-        Path path = Paths.get(filePath);
-        validateFile(path);
+    public static ConfigTransferData sliceFile(String filePath, int sliceSize) {
+        try {
+            Path path = Paths.get(filePath);
+            validateFile(path);
 
-        String taskNo = generateTaskNo();
-        long fileSize = Files.size(path);
-        List<ConfigTransferSlice> slices = readFileSlices(path, sliceSize, taskNo);
+            String fileName = path.getFileName().toString();
 
-        log.debug("filePath: {} , fileSize: {} KB, sliceSize: {} KB, slices.size: {}",
-                filePath, fileSize / 1024.0, sliceSize / 1024.0, slices.size());
+            String taskNo = generateTaskNo();
+            long fileSize = Files.size(path);
+            String md5 = calculateMD5(filePath);
 
-        return new ConfigTransferData(
-                fileSize,
-                sliceSize,
-                slices
-        );
+            List<ConfigTransferSlice> slices = readFileSlices(path, sliceSize, taskNo);
+
+            log.debug("文件路径: {} , 文件大小: {} KB, 切片大小: {} KB, 切片数量: {}",
+                    filePath, fileSize / 1024.0, sliceSize / 1024.0, slices.size());
+
+            return new ConfigTransferData(
+                    taskNo,
+                    fileName,
+                    fileSize,
+                    sliceSize,
+                    slices.size(),
+                    slices,
+                    md5
+            );
+        } catch (IOException e) {
+            log.error("文件切片处理出错: {}", e.getMessage(), e);
+            throw new FileSliceException("文件切片处理失败", e);
+        }
     }
 
     /**
@@ -115,5 +132,44 @@ public class FileSlicerUtil {
         }
 
         return slices;
+    }
+
+    /**
+     * 计算文件的MD5哈希值
+     *
+     * @param filePath 文件路径
+     * @return 文件的MD5哈希值（32位十六进制字符串）
+     * @throws IOException 如果文件读取发生错误
+     */
+    public static String calculateMD5(String filePath) throws IOException {
+        Path path = Paths.get(filePath);
+        validateFile(path);
+
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+
+            // 使用缓冲区分块读取文件以处理大文件
+            try (InputStream is = Files.newInputStream(path)) {
+                byte[] buffer = new byte[8192]; // 8KB缓冲区
+                int bytesRead;
+
+                while ((bytesRead = is.read(buffer)) != -1) {
+                    md.update(buffer, 0, bytesRead);
+                }
+            }
+
+            // 将字节数组转换为十六进制字符串
+            byte[] digest = md.digest();
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b & 0xff));
+            }
+
+            log.debug("文件 {} 的MD5值: {}", filePath, sb.toString());
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            log.error("计算MD5时出错: {}", e.getMessage());
+            throw new RuntimeException("计算MD5时出错", e);
+        }
     }
 }
