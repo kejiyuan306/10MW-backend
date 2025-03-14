@@ -31,150 +31,185 @@ public class DeviceService {
     private final TopicBuilder topicBuilder;
     private final MQTTDefaultConfig mqttDefaultConfig;
 
-    private final int MAX_TRY_TIME = 50;
-    private final int DEFAULT_SLICE_SIZE = 10 * 1024;
-    private final String METADATA_ACTION = "transfer_config";
-    private final String FINAL_MSG = "end";
+    // 常量定义
+    private static final int DEFAULT_MAX_TRY_TIME = 50;
+    private static final int DEFAULT_SLICE_SIZE = 10 * 1024;
+    private static final String METADATA_ACTION = "transfer_config";
+    private static final String FINAL_MSG = "end";
 
+    /**
+     * 发布配置到设备
+     */
     public CompletableFuture<Void> publishConfig(PublishConfigRequest request) {
         MQTTClientWrapper mqttClient = null;
         try {
-            // 验证MQTT连接参数
-            MQTTConnectionParams params = request.getMqttConnectionParams();
-            params = validateAndProcessMQTTParams(params);
+            // 验证并处理MQTT连接参数
+            MQTTConnectionParams params = validateAndProcessMQTTParams(request.getMqttConnectionParams());
 
-            // 创建MQTTClientWrapper实例并发布消息
-            log.debug("使用凭据连接MQTT代理: {}, 用户名: {}", params.getHost(), params.getUsername());
+            // 创建MQTT客户端并订阅相关主题
+            log.debug("连接MQTT代理: {}, 用户: {}", params.getHost(), params.getUsername());
             mqttClient = new MQTTClientWrapper(params);
 
-            mqttClient.subscribe(MqttTopic.CONFIG_TRANSFER_REQUEST_ACK.getTopic());
-            mqttClient.subscribe(MqttTopic.FILE_SLICE_ACK.getTopic());
-            mqttClient.subscribe(MqttTopic.FILE_VERIFICATION_RESULT.getTopic());
+            String[] topics = {
+                    MqttTopic.CONFIG_TRANSFER_REQUEST_ACK.getTopic(),
+                    MqttTopic.FILE_SLICE_ACK.getTopic(),
+                    MqttTopic.FILE_VERIFICATION_RESULT.getTopic()
+            };
 
+            for (String topic : topics) {
+                mqttClient.subscribe(topic);
+            }
+
+            // 准备状态响应对象
             ConfigTransferAcknowledgeResponse readyStatus = new ConfigTransferAcknowledgeResponse("ready");
             ConfigTransferAcknowledgeResponse successStatus = new ConfigTransferAcknowledgeResponse("success");
 
-            MQTTClientWrapper finalMqttClient = mqttClient;
+            // 使用最终变量以便在lambda表达式中使用
+            final MQTTClientWrapper finalMqttClient = mqttClient;
+
             return CompletableFuture.supplyAsync(() -> {
-                // 切片
-                int sliceSize = request.getSliceSize();
-                if (sliceSize <= 0) sliceSize = DEFAULT_SLICE_SIZE;
-                ConfigTransferData configTransferData = FileSlicerUtil.sliceFile(request.getConfigFilePath(), sliceSize);
-                ConfigTransferMetadata metadata = new ConfigTransferMetadata(METADATA_ACTION, configTransferData.getTaskNo(),
-                        configTransferData.getFileName(), configTransferData.getSize(), configTransferData.getNumber(),
-                        configTransferData.getSliceSize(), configTransferData.getMd5());
-                tryPublishVerificationData(finalMqttClient, MqttTopic.CONFIG_TRANSFER_REQUEST.getTopic(),
-                        MqttTopic.CONFIG_TRANSFER_REQUEST_ACK.getTopic(), JSON.toJSONString(metadata), readyStatus, request.getDeviceId());
-                for (ConfigTransferSlice slice : configTransferData.getSlices()) {
-                    tryPublishSliceData(finalMqttClient, MqttTopic.FILE_DATA_SLICE.getTopic(),
-                            MqttTopic.FILE_SLICE_ACK.getTopic(), JSON.toJSONString(slice),
-                            new ConfigTransferSliceResponse(slice.getTaskNo(), slice.getNumber(), "success"), request.getDeviceId());
+                try {
+                    // 切片文件
+                    int sliceSize = request.getSliceSize() <= 0 ? DEFAULT_SLICE_SIZE : request.getSliceSize();
+                    ConfigTransferData configData = FileSlicerUtil.sliceFile(request.getConfigFilePath(), sliceSize);
+                    String deviceId = request.getDeviceId();
+
+                    // 发送元数据
+                    ConfigTransferMetadata metadata = createMetadata(configData);
+                    publishWithRetry(finalMqttClient,
+                            MqttTopic.CONFIG_TRANSFER_REQUEST.getTopic(),
+                            MqttTopic.CONFIG_TRANSFER_REQUEST_ACK.getTopic(),
+                            JSON.toJSONString(metadata),
+                            readyStatus,
+                            deviceId,
+                            DEFAULT_MAX_TRY_TIME);
+
+                    // 发送每个文件切片
+                    for (ConfigTransferSlice slice : configData.getSlices()) {
+                        ConfigTransferSliceResponse expectedResponse = new ConfigTransferSliceResponse(
+                                slice.getTaskNo(), slice.getNumber(), "success");
+
+                        publishWithRetry(finalMqttClient,
+                                MqttTopic.FILE_DATA_SLICE.getTopic(),
+                                MqttTopic.FILE_SLICE_ACK.getTopic(),
+                                JSON.toJSONString(slice),
+                                expectedResponse,
+                                deviceId,
+                                DEFAULT_MAX_TRY_TIME);
+                    }
+
+                    // 发送最终确认消息
+                    publishWithRetry(finalMqttClient,
+                            MqttTopic.FILE_DATA_SLICE.getTopic(),
+                            MqttTopic.FILE_VERIFICATION_RESULT.getTopic(),
+                            FINAL_MSG,
+                            successStatus,
+                            deviceId,
+                            1);
+
+                    return null;
+                } finally {
+                    finalMqttClient.disconnect();
                 }
-
-                tryPublishVerificationData(finalMqttClient, MqttTopic.FILE_DATA_SLICE.getTopic(),
-                        MqttTopic.FILE_VERIFICATION_RESULT.getTopic(), FINAL_MSG, successStatus, request.getDeviceId());
-
-
-                return null;
             });
         } catch (MQTTValidationException e) {
             log.error("MQTT连接参数验证失败", e);
-            // 确保在异常情况下断开连接
-            if (mqttClient != null) {
-                mqttClient.disconnect();
-            }
+            disconnectIfNotNull(mqttClient);
             throw e;
+        } catch (Exception e) {
+            log.error("发布配置过程中发生错误", e);
+            disconnectIfNotNull(mqttClient);
+            throw new MessageProcessingException("发布配置失败: " + e.getMessage(), e);
         }
     }
 
-    private void tryPublishVerificationData(MQTTClientWrapper mqttClient, String publishTopic, String subscribeTopic,
-                                            String msg, ConfigTransferAcknowledgeResponse expectedStatus, String deviceId) {
-        mqttClient.publishMessage(publishTopic, msg);
-        String response = mqttClient.listen(subscribeTopic);
-        ConfigTransferAcknowledgeResponse responseObj = JSON.parseObject(response, ConfigTransferAcknowledgeResponse.class);
-        for (int i = 0; i < MAX_TRY_TIME; i++) {
-            if (responseObj.equals(expectedStatus)) break;
-            mqttClient.publishMessage(publishTopic, msg);
-            response = mqttClient.listen(subscribeTopic);
-        }
-        if (!responseObj.equals(expectedStatus))
-            throw new DeviceInteractionException("设备返回错误响应，超出重试次数", deviceId);
+    /**
+     * 创建配置元数据对象
+     */
+    private ConfigTransferMetadata createMetadata(ConfigTransferData configData) {
+        return new ConfigTransferMetadata(
+                METADATA_ACTION,
+                configData.getTaskNo(),
+                configData.getFileName(),
+                configData.getSize(),
+                configData.getNumber(),
+                configData.getSliceSize(),
+                configData.getMd5()
+        );
     }
 
-    private void tryPublishSliceData(MQTTClientWrapper mqttClient, String publishTopic, String subscribeTopic,
-                                     String msg, ConfigTransferSliceResponse expectedStatus, String deviceId) {
-        mqttClient.publishMessage(publishTopic, msg);
+    /**
+     * 发布确认数据并重试
+     */
+    private void publishWithRetry(MQTTClientWrapper mqttClient, String publishTopic, String subscribeTopic,
+                                  String message, Object expectedStatus, String deviceId, int retryTime) {
+        mqttClient.publishMessage(publishTopic, message);
         String response = mqttClient.listen(subscribeTopic);
-        ConfigTransferSliceResponse responseObj = JSON.parseObject(response, ConfigTransferSliceResponse.class);
-        for (int i = 0; i < MAX_TRY_TIME; i++) {
-            if (responseObj.equals(expectedStatus)) break;
-            mqttClient.publishMessage(publishTopic, msg);
-            response = mqttClient.listen(subscribeTopic);
+        Object responseObj;
+
+        if (expectedStatus instanceof ConfigTransferAcknowledgeResponse) {
+            responseObj = JSON.parseObject(response, ConfigTransferAcknowledgeResponse.class);
+        } else {
+            responseObj = JSON.parseObject(response, ConfigTransferSliceResponse.class);
         }
-        if (!responseObj.equals(expectedStatus))
+
+        // 重试逻辑
+        for (int i = 0; i < retryTime && !responseObj.equals(expectedStatus); i++) {
+            mqttClient.publishMessage(publishTopic, message);
+            response = mqttClient.listen(subscribeTopic);
+
+            if (expectedStatus instanceof ConfigTransferAcknowledgeResponse) {
+                responseObj = JSON.parseObject(response, ConfigTransferAcknowledgeResponse.class);
+            } else {
+                responseObj = JSON.parseObject(response, ConfigTransferSliceResponse.class);
+            }
+        }
+
+        if (!responseObj.equals(expectedStatus)) {
             throw new DeviceInteractionException("设备返回错误响应，超出重试次数", deviceId);
+        }
     }
 
     /**
      * 处理设备的功能块并发布到MQTT
-     *
-     * @param request 包含设备ID、功能块和MQTT连接参数的请求
-     * @return 当消息发布完成时完成的CompletableFuture
      */
     public CompletableFuture<Void> processFunctionBlocks(DeviceFunctionBlockRequest request) {
         MQTTClientWrapper mqttClient = null;
         try {
             // 验证MQTT连接参数
-            MQTTConnectionParams params = request.getMqttConnectionParams();
-            params = validateAndProcessMQTTParams(params);
+            MQTTConnectionParams params = validateAndProcessMQTTParams(request.getMqttConnectionParams());
 
-            // Create the wrapper object
+            // 创建功能块配置对象并序列化
             FunctionBlockConfiguration configuration = new FunctionBlockConfiguration();
             configuration.setFunctionBlocks(request.getFunctionBlocks());
-
-            // Serialize function blocks to JSON
             String payload = JSON.toJSONString(configuration);
+
             log.debug("设备 {} 的功能块序列化结果: {}", request.getDeviceId(), payload);
 
-            // Build the topic for this device
+            // 构建发布主题
             String topic = topicBuilder.buildPublishTopic(request.getDeviceId());
 
-            // 创建MQTTClientWrapper实例并发布消息
-            log.debug("使用凭据连接MQTT代理: {}, 用户名: {}", params.getHost(), params.getUsername());
+            // 创建MQTT客户端并发布消息
+            log.debug("连接MQTT代理: {}, 用户: {}", params.getHost(), params.getUsername());
             mqttClient = new MQTTClientWrapper(params);
-            // 只是满足lamda表达式中的变量为final的要求
-            MQTTClientWrapper finalMqttClient = mqttClient;
+
+            final MQTTClientWrapper finalMqttClient = mqttClient;
             return mqttClient.publishMessage(topic, payload)
-                    .whenComplete((result, ex) -> {
-                        // 无论成功还是失败，都断开连接
-                        if (finalMqttClient != null) {
-                            finalMqttClient.disconnect();
-                        }
-                    });
+                    .whenComplete((result, ex) -> disconnectIfNotNull(finalMqttClient));
 
         } catch (MQTTValidationException e) {
             log.error("MQTT连接参数验证失败", e);
-            // 确保在异常情况下断开连接
-            if (mqttClient != null) {
-                mqttClient.disconnect();
-            }
+            disconnectIfNotNull(mqttClient);
             throw e;
         } catch (Exception e) {
             log.error("处理功能块失败", e);
-            // 确保在异常情况下断开连接
-            if (mqttClient != null) {
-                mqttClient.disconnect();
-            }
+            disconnectIfNotNull(mqttClient);
             throw new MessageProcessingException("处理功能块失败: " + e.getMessage(), e);
         }
     }
 
     /**
      * 验证和处理MQTT连接参数
-     *
-     * @param params MQTT连接参数
-     * @return 处理后的MQTT连接参数
-     * @throws MQTTValidationException 如果参数验证失败
      */
     private MQTTConnectionParams validateAndProcessMQTTParams(MQTTConnectionParams params) {
         if (params == null) {
@@ -197,5 +232,14 @@ public class DeviceService {
         }
 
         return params;
+    }
+
+    /**
+     * 安全断开MQTT连接
+     */
+    private void disconnectIfNotNull(MQTTClientWrapper mqttClient) {
+        if (mqttClient != null) {
+            mqttClient.disconnect();
+        }
     }
 }
