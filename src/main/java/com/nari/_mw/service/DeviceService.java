@@ -144,31 +144,76 @@ public class DeviceService {
      */
     private void publishWithRetry(MQTTClientWrapper mqttClient, String publishTopic, String subscribeTopic,
                                   String message, Object expectedStatus, String deviceId, int retryTime) {
-        mqttClient.publishMessage(publishTopic, message);
-        String response = mqttClient.listen(subscribeTopic);
-        Object responseObj;
-
-        if (expectedStatus instanceof ConfigTransferAcknowledgeResponse) {
-            responseObj = JSON.parseObject(response, ConfigTransferAcknowledgeResponse.class);
-        } else {
-            responseObj = JSON.parseObject(response, ConfigTransferSliceResponse.class);
-        }
-
-        // 重试逻辑
-        for (int i = 0; i < retryTime && !responseObj.equals(expectedStatus); i++) {
+        try {
             mqttClient.publishMessage(publishTopic, message);
-            response = mqttClient.listen(subscribeTopic);
+            String response = mqttClient.listen(subscribeTopic);
 
-            if (expectedStatus instanceof ConfigTransferAcknowledgeResponse) {
-                responseObj = JSON.parseObject(response, ConfigTransferAcknowledgeResponse.class);
-            } else {
-                responseObj = JSON.parseObject(response, ConfigTransferSliceResponse.class);
+            // 检查响应是否为空
+            if (response == null || response.trim().isEmpty()) {
+                throw new DeviceInteractionException("设备没有返回响应", deviceId);
             }
+
+            Object responseObj = null;
+
+            try {
+                if (expectedStatus instanceof ConfigTransferAcknowledgeResponse) {
+                    responseObj = JSON.parseObject(response, ConfigTransferAcknowledgeResponse.class);
+                } else {
+                    responseObj = JSON.parseObject(response, ConfigTransferSliceResponse.class);
+                }
+            } catch (Exception e) {
+                log.error("解析设备响应失败: {}", response, e);
+                throw new MessageProcessingException("无法解析设备响应: " + e.getMessage());
+            }
+
+            // 重试逻辑
+            for (int i = 0; i < retryTime && !isResponseMatching(responseObj, expectedStatus); i++) {
+                log.debug("设备响应不匹配，重试第{}次: {}", (i + 1), response);
+                mqttClient.publishMessage(publishTopic, message);
+                response = mqttClient.listen(subscribeTopic);
+
+                if (response == null || response.trim().isEmpty()) {
+                    continue;
+                }
+
+                try {
+                    if (expectedStatus instanceof ConfigTransferAcknowledgeResponse) {
+                        responseObj = JSON.parseObject(response, ConfigTransferAcknowledgeResponse.class);
+                    } else {
+                        responseObj = JSON.parseObject(response, ConfigTransferSliceResponse.class);
+                    }
+                } catch (Exception e) {
+                    log.warn("重试时解析设备响应失败: {}", response);
+                }
+            }
+
+            if (!isResponseMatching(responseObj, expectedStatus)) {
+                throw new DeviceInteractionException("设备返回错误响应，超出重试次数: " + response, deviceId);
+            }
+        } catch (DeviceInteractionException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new DeviceInteractionException("与设备通信失败: " + e.getMessage(), deviceId, e);
+        }
+    }
+
+    private boolean isResponseMatching(Object responseObj, Object expectedStatus) {
+        if (responseObj == null || expectedStatus == null) {
+            return false;
         }
 
-        if (!responseObj.equals(expectedStatus)) {
-            throw new DeviceInteractionException("设备返回错误响应，超出重试次数", deviceId);
+        if (expectedStatus instanceof ConfigTransferAcknowledgeResponse && responseObj instanceof ConfigTransferAcknowledgeResponse) {
+            return ((ConfigTransferAcknowledgeResponse) responseObj).getStatus()
+                    .equals(((ConfigTransferAcknowledgeResponse) expectedStatus).getStatus());
+        } else if (expectedStatus instanceof ConfigTransferSliceResponse && responseObj instanceof ConfigTransferSliceResponse) {
+            ConfigTransferSliceResponse resp = (ConfigTransferSliceResponse) responseObj;
+            ConfigTransferSliceResponse expected = (ConfigTransferSliceResponse) expectedStatus;
+            return resp.getTaskNo().equals(expected.getTaskNo()) &&
+                    resp.getNumber() == expected.getNumber() &&
+                    resp.getStatus().equals(expected.getStatus());
         }
+
+        return false;
     }
 
     /**
