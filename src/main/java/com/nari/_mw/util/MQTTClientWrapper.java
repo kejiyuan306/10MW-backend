@@ -17,14 +17,26 @@ import java.util.concurrent.TimeUnit;
 public class MQTTClientWrapper {
     private final MqttClient client;
     private final ConcurrentHashMap<String, BlockingQueue<String>> messageQueues;
+    private static final ConcurrentHashMap<String, MQTTClientWrapper> activeClients = new ConcurrentHashMap<>();
 
     public MQTTClientWrapper(MQTTConnectionParams params) {
         try {
             String clientId = "mqtt-client-" + UUID.randomUUID();
+
+            // 检查是否有旧连接并关闭
+            String serverURI = params.getHost();
+            MQTTClientWrapper oldClient = activeClients.get(serverURI);
+            if (oldClient != null) {
+                oldClient.disconnect();
+            }
+
             this.client = new MqttClient(params.getHost(), clientId, new MemoryPersistence());
             this.messageQueues = new ConcurrentHashMap<>();
             setupClientCallbacks();
             connectClient(params.getUsername(), params.getPassword());
+
+            // 注册当前客户端
+            activeClients.put(serverURI, this);
         } catch (MqttException e) {
             log.error("创建MQTT客户端失败: {}", params.getHost(), e);
             throw new RuntimeException("创建MQTT客户端失败", e);
@@ -219,6 +231,9 @@ public class MQTTClientWrapper {
     public void disconnect() {
         try {
             if (client != null && client.isConnected()) {
+                // 从活动客户端映射中移除
+                activeClients.remove(client.getServerURI());
+
                 client.disconnect();
                 client.close();
                 log.info("已断开与MQTT代理的连接: {}", client.getServerURI());
