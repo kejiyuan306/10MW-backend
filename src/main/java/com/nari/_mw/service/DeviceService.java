@@ -22,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 @Slf4j
@@ -32,10 +33,9 @@ public class DeviceService {
     private final MQTTDefaultConfig mqttDefaultConfig;
 
     // 常量定义
-    private static final int DEFAULT_MAX_TRY_TIME = 50;
+    private static final int DEFAULT_MAX_TRY_TIME = 2;
     private static final int DEFAULT_SLICE_SIZE = 10 * 1024;
     private static final String METADATA_ACTION = "transfer_config";
-    private static final String FINAL_MSG = "end";
 
     /**
      * 发布配置到设备
@@ -85,14 +85,15 @@ public class DeviceService {
                             DEFAULT_MAX_TRY_TIME);
 
                     // 发送每个文件切片
-                    for (ConfigTransferSlice slice : configData.getSlices()) {
+                    List<ConfigTransferSlice> slices = configData.getSlices();
+                    for (int i = 0; i < slices.size() - 1; i++) {
                         ConfigTransferSliceResponse expectedResponse = new ConfigTransferSliceResponse(
-                                slice.getTaskNo(), slice.getNumber(), "success");
+                                slices.get(i).getTaskNo(), slices.get(i).getNumber(), "success");
 
                         publishWithRetry(finalMqttClient,
                                 MqttTopic.FILE_DATA_SLICE.getTopic(),
                                 MqttTopic.FILE_SLICE_ACK.getTopic(),
-                                JSON.toJSONString(slice),
+                                JSON.toJSONString(slices.get(i)),
                                 expectedResponse,
                                 deviceId,
                                 DEFAULT_MAX_TRY_TIME);
@@ -102,7 +103,7 @@ public class DeviceService {
                     publishWithRetry(finalMqttClient,
                             MqttTopic.FILE_DATA_SLICE.getTopic(),
                             MqttTopic.FILE_VERIFICATION_RESULT.getTopic(),
-                            FINAL_MSG,
+                            JSON.toJSONString(slices.get(slices.size() - 1)),
                             successStatus,
                             deviceId,
                             1);
